@@ -18,6 +18,8 @@ import '../../common.dart';
 import '../../common/widgets/overlay.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/remote_input.dart';
+import '../../common/widgets/screen_draw_overlay.dart';
+import '../../common/widgets/uu_session_panel.dart';
 import '../../models/input_model.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
@@ -25,6 +27,7 @@ import '../../models/shortcut_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
 import '../widgets/custom_scale_widget.dart';
+import '../widgets/native_touch_region.dart';
 
 final initText = '1' * 1024;
 
@@ -91,6 +94,9 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Timer? _timer;
   bool _showBar = !isWebDesktop;
   bool _showGestureHelp = false;
+  bool _showSettingsDrawer = false;
+  bool _showZoomHud = false;
+  bool _showScreenDraw = false;
   String _value = '';
   Orientation? _currentOrientation;
   final _uniqueKey = UniqueKey();
@@ -482,11 +488,26 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     });
   }
 
-  Widget _bottomWidget() => _showGestureHelp
-      ? getGestureHelp()
-      : (_showBar && gFFI.ffiModel.pi.displays.isNotEmpty
-          ? getBottomAppBar()
-          : Offstage());
+  Widget _bottomWidget() => _showGestureHelp ? getGestureHelp() : Offstage();
+
+  void _toggleQuickInputMode() {
+    final isWin = gFFI.ffiModel.isPeerWindows;
+    final cur = inputModel.mobileInputMode.value;
+    if (isWin) {
+      final next = cur == kMobileInputNativeTouch
+          ? kMobileInputMouse
+          : kMobileInputNativeTouch;
+      inputModel.setMobileInputMode(next);
+      showToast(translate(next == kMobileInputNativeTouch
+          ? 'Windows native touch (no cursor)'
+          : 'Mouse mode'));
+    } else {
+      final next = cur == kMobileInputTouchMouse
+          ? kMobileInputMouse
+          : kMobileInputTouchMouse;
+      inputModel.setMobileInputMode(next);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -514,7 +535,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                         : Icons.expand_less,
                     color: Colors.white,
                   ),
-                  backgroundColor: MyTheme.accent,
+                  backgroundColor: kUUOrange,
                   onPressed: () {
                     setState(() {
                       if (keyboardIsVisible) {
@@ -564,14 +585,111 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                                   gFFI.canvasModel.updateViewStyle();
                                 });
                               }
-                              return Container(
-                                color: MyTheme.canvasColor,
-                                child: inputModel.isPhysicalMouse.value
-                                    ? getBodyForMobile()
-                                    : RawTouchGestureDetectorRegion(
+                              return Stack(
+                                children: [
+                                  Container(
+                                    color: MyTheme.canvasColor,
+                                    child: Obx(() {
+                                      final _ = inputModel.mobileInputMode.value;
+                                      if (inputModel.isPhysicalMouse.value) {
+                                        return getBodyForMobile();
+                                      }
+                                      if (inputModel.isNativeTouchMode) {
+                                        return NativeTouchRegion(
+                                          ffi: gFFI,
+                                          child: getBodyForMobile(),
+                                        );
+                                      }
+                                      return RawTouchGestureDetectorRegion(
                                         child: getBodyForMobile(),
                                         ffi: gFFI,
+                                      );
+                                    }),
+                                  ),
+                                  if (_showScreenDraw)
+                                    ScreenDrawOverlay(
+                                      onClose: () => setState(
+                                          () => _showScreenDraw = false),
+                                    ),
+                                  if (gFFI.ffiModel.pi.isSet.isTrue &&
+                                      !gFFI.ffiModel.waitForFirstImage.value)
+                                    Positioned(
+                                      top: 10,
+                                      left: 12,
+                                      child: UUMobileTopStatusPill(ffi: gFFI),
+                                    ),
+                                  if (_showZoomHud &&
+                                      gFFI.ffiModel.pi.displays.isNotEmpty)
+                                    Positioned(
+                                      bottom: _showBar ? 68 : 18,
+                                      left: 12,
+                                      right: _showSettingsDrawer ? 352 : 12,
+                                      child: Center(
+                                        child: UUMobileZoomHud(
+                                          ffi: gFFI,
+                                          onClose: () => setState(
+                                              () => _showZoomHud = false),
+                                        ),
                                       ),
+                                    ),
+                                  if (_showBar &&
+                                      !_showGestureHelp &&
+                                      gFFI.ffiModel.pi.displays.isNotEmpty)
+                                    Positioned(
+                                      bottom: 12,
+                                      left: 12,
+                                      right: _showSettingsDrawer ? 352 : 12,
+                                      child: Center(
+                                        child: SingleChildScrollView(
+                                          scrollDirection: Axis.horizontal,
+                                          child: UUMobileSessionDock(
+                                            id: widget.id,
+                                            ffi: gFFI,
+                                            drawerOpen: _showSettingsDrawer,
+                                            zoomHudOpen: _showZoomHud,
+                                            onToggleDrawer: () => setState(() {
+                                              _showEdit = false;
+                                              _showSettingsDrawer =
+                                                  !_showSettingsDrawer;
+                                            }),
+                                            onToggleZoomHud: () => setState(() {
+                                              _showZoomHud = !_showZoomHud;
+                                            }),
+                                            onOpenKeyboard: openKeyboard,
+                                            onToggleInputMode:
+                                                _toggleQuickInputMode,
+                                            onDisconnect: () =>
+                                                clientClose(sessionId, gFFI),
+                                            onCollapse: () => setState(() {
+                                              _showBar = false;
+                                            }),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  if (_showSettingsDrawer)
+                                    Positioned(
+                                      top: 0,
+                                      bottom: 0,
+                                      right: 0,
+                                      child: UUSessionSettingsPanel(
+                                        id: widget.id,
+                                        ffi: gFFI,
+                                        isMobileStyle: true,
+                                        screenDrawActive: _showScreenDraw,
+                                        onToggleScreenDraw: () => setState(() =>
+                                            _showScreenDraw = !_showScreenDraw),
+                                        onOpenKeyboard: openKeyboard,
+                                        onToggleGestureHelp: () =>
+                                            setState(() {
+                                          _showSettingsDrawer = false;
+                                          _showGestureHelp = !_showGestureHelp;
+                                        }),
+                                        onClose: () => setState(
+                                            () => _showSettingsDrawer = false),
+                                      ),
+                                    ),
+                                ],
                               );
                             }),
                           ),
@@ -704,14 +822,20 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   bool get showCursorPaint =>
       !gFFI.ffiModel.isPeerAndroid &&
       !gFFI.canvasModel.cursorEmbedded &&
-      !gFFI.inputModel.relativeMouseMode.value;
+      !gFFI.inputModel.relativeMouseMode.value &&
+      !gFFI.inputModel.isNativeTouchMode;
 
   Widget getBodyForMobile() {
+    final canvas = Provider.of<CanvasModel>(context);
+    final isNativeTouch = gFFI.inputModel.isNativeTouchMode;
     return Container(
         color: MyTheme.canvasColor,
         child: Stack(children: () {
           final paints = [
-            ImagePaint(ffiModel: gFFI.ffiModel),
+            RotatedBox(
+              quarterTurns: canvas.rotationTurns,
+              child: ImagePaint(ffiModel: gFFI.ffiModel),
+            ),
             Positioned(
               top: 10,
               right: 10,
@@ -757,16 +881,21 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
             ),
           ];
           if (showCursorPaint) {
-            paints.add(CursorPaint(widget.id));
+            paints.add(RotatedBox(
+              quarterTurns: canvas.rotationTurns,
+              child: CursorPaint(widget.id),
+            ));
           }
-          if (gFFI.ffiModel.touchMode) {
-            paints.add(FloatingMouse(
-              ffi: gFFI,
-            ));
-          } else {
-            paints.add(FloatingMouseWidgets(
-              ffi: gFFI,
-            ));
+          if (!isNativeTouch) {
+            if (gFFI.ffiModel.touchMode) {
+              paints.add(FloatingMouse(
+                ffi: gFFI,
+              ));
+            } else {
+              paints.add(FloatingMouseWidgets(
+                ffi: gFFI,
+              ));
+            }
           }
           return paints;
         }()));

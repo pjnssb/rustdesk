@@ -5,7 +5,8 @@ use crate::input::*;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::whiteboard;
 use base::message_proto::{
-    pointer_device_event::Union::TouchEvent, touch_event::Union::ScaleUpdate,
+    pointer_device_event::Union::TouchEvent,
+    touch_event::Union::{Contacts, ScaleUpdate},
 };
 #[cfg(target_os = "macos")]
 use dispatch::Queue;
@@ -44,6 +45,8 @@ impl super::service::Reset for StateCursor {
         *self = Default::default();
         CURSOR_SHAPES.lock().unwrap().clear();
         crate::platform::reset_input_cache();
+        #[cfg(windows)]
+        crate::platform::win_touch::reset_touches();
         fix_key_down_timeout(true);
     }
 }
@@ -1244,6 +1247,15 @@ pub fn handle_pointer_(evt: &PointerDeviceEvent, conn: i32) {
             Some(ScaleUpdate(_scale_evt)) => {
                 #[cfg(target_os = "windows")]
                 handle_scale(_scale_evt.scale);
+            }
+            Some(Contacts(contacts)) => {
+                #[cfg(target_os = "windows")]
+                {
+                    crate::platform::windows::try_change_desktop();
+                    crate::platform::win_touch::inject_touch_contacts(contacts);
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = contacts;
             }
             _ => {}
         },

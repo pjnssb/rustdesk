@@ -185,6 +185,13 @@ pub const OPTION_KEEP_AWAKE_DURING_OUTGOING_SESSIONS: &str = "keep-awake-during-
 pub const OPTION_DISABLE_GROUP_PANEL: &str = "disable-group-panel";
 pub const OPTION_DISABLE_DISCOVERY_PANEL: &str = "disable-discovery-panel";
 pub const OPTION_PRE_ELEVATE_SERVICE: &str = "pre-elevate-service";
+pub const OPTION_MOBILE_INPUT_MODE: &str = "mobile-input-mode";
+pub const OPTION_HDR_MODE: &str = "hdr-mode";
+pub const OPTION_AUTO_COLOR_DOWNGRADE: &str = "auto-color-downgrade";
+pub const OPTION_AUDIO_VOLUME: &str = "audio-volume";
+pub const OPTION_SMART_MOUSE: &str = "smart-mouse";
+pub const OPTION_MOUSE_SENSITIVITY: &str = "mouse-sensitivity";
+pub const OPTION_SCREEN_ROTATION: &str = "screen-rotation";
 
 // DEFAULT_DISPLAY_SETTINGS, OVERWRITE_DISPLAY_SETTINGS
 pub const KEYS_DISPLAY_SETTINGS: &[&str] = &[
@@ -202,7 +209,14 @@ pub const KEYS_DISPLAY_SETTINGS: &[&str] = &[
     OPTION_LOCK_AFTER_SESSION_END,
     OPTION_PRIVACY_MODE,
     OPTION_TOUCH_MODE,
+    OPTION_MOBILE_INPUT_MODE,
     OPTION_I444,
+    OPTION_HDR_MODE,
+    OPTION_AUTO_COLOR_DOWNGRADE,
+    OPTION_AUDIO_VOLUME,
+    OPTION_SMART_MOUSE,
+    OPTION_MOUSE_SENSITIVITY,
+    OPTION_SCREEN_ROTATION,
     OPTION_REVERSE_MOUSE_WHEEL,
     OPTION_SWAP_LEFT_RIGHT_MOUSE,
     OPTION_DISPLAYS_AS_INDIVIDUAL_WINDOWS,

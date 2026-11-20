@@ -450,6 +450,9 @@ class InputModel {
   // Mobile relative mouse delta accumulators (for slow/fine movements).
   double _mobileDeltaRemainderX = 0.0;
   double _mobileDeltaRemainderY = 0.0;
+  final RxString mobileInputMode = kMobileInputNativeTouch.obs;
+  final RxBool smartMouse = false.obs;
+  double mouseSensitivity = 1.0;
 
   var _lastScale = 1.0;
 
@@ -1498,13 +1501,100 @@ class InputModel {
   ///
   /// Accumulates fractional deltas to avoid losing slow/fine movements.
   /// Only sends events when relative mouse mode is enabled and supported.
+  bool get isNativeTouchMode =>
+      isMobile &&
+      !isPhysicalMouse.value &&
+      mobileInputMode.value == kMobileInputNativeTouch &&
+      (parent.target?.ffiModel.isPeerWindows ?? false);
+
+  Future<void> loadSessionInputOptions() async {
+    final ffi = parent.target;
+    if (ffi == null) return;
+    final modeOpt = await bind.sessionGetOption(
+        sessionId: sessionId, arg: kOptionMobileInputMode);
+    if (modeOpt != null && modeOpt.isNotEmpty) {
+      mobileInputMode.value = modeOpt;
+    } else if (ffi.ffiModel.isPeerWindows) {
+      mobileInputMode.value = kMobileInputNativeTouch;
+    } else {
+      mobileInputMode.value =
+          ffi.ffiModel.touchMode ? kMobileInputTouchMouse : kMobileInputMouse;
+    }
+    final sensOpt = await bind.sessionGetOption(
+        sessionId: sessionId, arg: kOptionMouseSensitivity);
+    final sens = int.tryParse(sensOpt ?? '') ?? 100;
+    mouseSensitivity = sens.clamp(10, 300) / 100.0;
+
+    final smartOpt = await bind.sessionGetOption(
+        sessionId: sessionId, arg: kOptionSmartMouse);
+    smartMouse.value = smartOpt == 'Y';
+  }
+
+  Future<void> setMobileInputMode(String mode) async {
+    mobileInputMode.value = mode;
+    await bind.sessionPeerOption(
+        sessionId: sessionId, name: kOptionMobileInputMode, value: mode);
+    final ffi = parent.target;
+    if (ffi == null) return;
+    final wantTouch = mode == kMobileInputTouchMouse || mode == kMobileInputNativeTouch;
+    if (ffi.ffiModel.touchMode != wantTouch && !ffi.ffiModel.isPeerAndroid) {
+      ffi.ffiModel.toggleTouchMode();
+      await bind.mainSetLocalOption(
+          key: kOptionTouchMode, value: wantTouch ? 'Y' : 'N');
+    }
+    if (mode != kMobileInputMouse && relativeMouseMode.value) {
+      setRelativeMouseMode(false);
+    }
+  }
+
+  Future<void> setMouseSensitivityPercent(int percent) async {
+    final clamped = percent.clamp(10, 300);
+    mouseSensitivity = clamped / 100.0;
+    await bind.sessionPeerOption(
+        sessionId: sessionId,
+        name: kOptionMouseSensitivity,
+        value: clamped.toString());
+  }
+
+  Future<void> setSmartMouse(bool enabled) async {
+    smartMouse.value = enabled;
+    await bind.sessionPeerOption(
+        sessionId: sessionId,
+        name: kOptionSmartMouse,
+        value: enabled ? 'Y' : '');
+    if (isRelativeMouseModeSupported && enabled != relativeMouseMode.value) {
+      setRelativeMouseMode(enabled);
+    }
+  }
+
+  Future<void> sendNativeTouchContacts(
+      List<Map<String, dynamic>> contacts) async {
+    if (isViewOnly || !keyboardPerm || isViewCamera || contacts.isEmpty) {
+      return;
+    }
+    await bind.sessionSendPointer(
+      sessionId: sessionId,
+      msg: json.encode({
+        'k': kPointerEventKindTouch,
+        'v': {
+          't': 'contacts',
+          'v': contacts,
+        },
+        if (alt) 'alt': true,
+        if (ctrl) 'ctrl': true,
+        if (shift) 'shift': true,
+        if (command) 'command': true,
+      }),
+    );
+  }
+
   Future<void> sendMobileRelativeMouseMove(double dx, double dy) async {
     if (!keyboardPerm) return;
     if (isViewCamera) return;
     // Only send relative mouse events when relative mode is enabled and supported.
     if (!isRelativeMouseModeSupported || !relativeMouseMode.value) return;
-    _mobileDeltaRemainderX += dx;
-    _mobileDeltaRemainderY += dy;
+    _mobileDeltaRemainderX += dx * mouseSensitivity;
+    _mobileDeltaRemainderY += dy * mouseSensitivity;
     final x = _mobileDeltaRemainderX.truncate();
     final y = _mobileDeltaRemainderY.truncate();
     _mobileDeltaRemainderX -= x;

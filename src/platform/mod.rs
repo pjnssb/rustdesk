@@ -11,6 +11,9 @@ pub mod windows;
 #[cfg(windows)]
 pub mod win_device;
 
+#[cfg(any(windows, test))]
+pub mod win_touch;
+
 #[cfg(target_os = "macos")]
 pub mod macos;
 
@@ -88,6 +91,8 @@ pub fn is_xfce() -> bool {
 pub fn breakdown_callback() {
     #[cfg(target_os = "linux")]
     crate::input_service::clear_remapped_keycode();
+    #[cfg(windows)]
+    crate::platform::win_touch::reset_touches();
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     crate::input_service::release_device_modifiers();
 }
