@@ -217,10 +217,10 @@ class _UUSessionSettingsPanelState extends State<UUSessionSettingsPanel> {
       w = 2560;
       h = 1440;
     } else if (preset == 'original') {
-      final orig = pi.tryGetDisplayIfNotAllDisplay()?.originalResolution;
-      if (orig != null && orig.width > 0 && orig.height > 0) {
-        w = orig.width;
-        h = orig.height;
+      final orig = pi.tryGetDisplayIfNotAllDisplay();
+      if (orig != null && orig.originalWidth > 0 && orig.originalHeight > 0) {
+        w = orig.originalWidth;
+        h = orig.originalHeight;
       }
     }
     if (w != null && h != null && w > 0 && h > 0) {

@@ -1940,7 +1940,7 @@ fn session_send_touch_contacts(
     shift: bool,
     command: bool,
 ) {
-    use base::message_proto::{touch_phase::TouchPhase, TouchContact};
+    use base::message_proto::{TouchContact, TouchPhase};
     let Some(items) = v.get("v").and_then(|c| c.as_array()) else {
         return;
     };
