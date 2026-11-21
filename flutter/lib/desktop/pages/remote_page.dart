@@ -1137,13 +1137,20 @@ class _RemotePageState extends State<RemotePage>
     }
     return Stack(
       children: [
-        AnimatedBuilder(
-          animation: _ffi.canvasModel,
-          builder: (context, child) => RotatedBox(
-            quarterTurns: _ffi.canvasModel.rotationTurns,
-            child: child,
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: _ffi.canvasModel,
+            builder: (context, child) {
+              final turns = _ffi.canvasModel.rotationTurns;
+              return turns == 0
+                  ? child!
+                  : RotatedBox(
+                      quarterTurns: turns,
+                      child: SizedBox.expand(child: child),
+                    );
+            },
+            child: Stack(children: paints),
           ),
-          child: Stack(children: paints),
         ),
         Positioned(
           top: 52,
