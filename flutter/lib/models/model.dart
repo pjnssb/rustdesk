@@ -1411,6 +1411,9 @@ class FfiModel with ChangeNotifier {
     if (isMobile) {
       virtualMouseMode.loadOptions();
     }
+    unawaited(parent.target?.inputModel.loadSessionInputOptions());
+    unawaited(parent.target?.qualityMonitorModel.loadSessionColorOptions());
+    unawaited(parent.target?.canvasModel.loadRotationOption());
     if (connType == ConnType.fileTransfer) {
       parent.target?.fileModel.onReady();
     } else if (connType == ConnType.terminal) {
@@ -2022,20 +2025,20 @@ class ImageModel with ChangeNotifier {
 
   // mobile only
   double get maxScale {
-    if (_image == null) return 1.5;
+    if (_image == null) return 5.0;
     final size = parent.target!.canvasModel.getSize();
     final xscale = size.width / _image!.width;
     final yscale = size.height / _image!.height;
-    return max(1.5, max(xscale, yscale));
+    return max(5.0, max(xscale, yscale) * 2.0);
   }
 
   // mobile only
   double get minScale {
-    if (_image == null) return 1.5;
+    if (_image == null) return 0.25;
     final size = parent.target!.canvasModel.getSize();
     final xscale = size.width / _image!.width;
     final yscale = size.height / _image!.height;
-    return min(xscale, yscale) / 1.5;
+    return min(0.25, min(xscale, yscale) / 2.0);
   }
 
   updateUserTextureRender() {
@@ -2282,6 +2285,7 @@ class CanvasModel with ChangeNotifier {
   final ScrollController _vertical = ScrollController();
 
   final _imageOverflow = false.obs;
+  int _rotationTurns = 0;
 
   WeakReference<FFI> parent;
 
@@ -2298,6 +2302,98 @@ class CanvasModel with ChangeNotifier {
   ScrollStyle get scrollStyle => _scrollStyle;
   ViewStyle get viewStyle => _lastViewStyle;
   RxBool get imageOverflow => _imageOverflow;
+  int get rotationTurns => _rotationTurns;
+
+  int get currentZoomPercent {
+    final effectiveScale = kIgnoreDpi ? _scale * _devicePixelRatio : _scale;
+    return (effectiveScale * 100).round().clamp(kScaleCustomMinPercent, kScaleCustomMaxPercent);
+  }
+
+  Future<void> loadRotationOption() async {
+    final v = await bind.sessionGetOption(
+        sessionId: sessionId, arg: kOptionScreenRotation);
+    final deg = int.tryParse(v ?? '') ?? 0;
+    final turns = ((deg ~/ 90) % 4 + 4) % 4;
+    if (_rotationTurns != turns) {
+      _rotationTurns = turns;
+      notifyListeners();
+    }
+  }
+
+  Future<void> setRotationTurns(int turns) async {
+    final normalized = ((turns % 4) + 4) % 4;
+    if (_rotationTurns == normalized) return;
+    _rotationTurns = normalized;
+    notifyListeners();
+    await bind.sessionPeerOption(
+      sessionId: sessionId,
+      name: kOptionScreenRotation,
+      value: (normalized * 90).toString(),
+    );
+  }
+
+  Future<void> rotateQuarter() => setRotationTurns(_rotationTurns + 1);
+
+  void setZoomScale(double newScale, {Offset? focalPoint}) {
+    final oldScale = _scale;
+    if (oldScale <= 0) return;
+    final minS = isMobile
+        ? (parent.target?.imageModel.minScale ?? 0.25)
+        : 0.1;
+    final maxS = isMobile
+        ? (parent.target?.imageModel.maxScale ?? 5.0)
+        : 5.0;
+    final clamped = newScale.clamp(minS, maxS).toDouble();
+    final center = focalPoint ?? Offset(size.width / 2, size.height / 2);
+    final adjust = isMobile ? getAdjustY() : 0.0;
+    _scale = clamped;
+    _x = center.dx - (center.dx - _x) / oldScale * _scale;
+    _y = center.dy - adjust - (center.dy - _y - adjust) / oldScale * _scale;
+    final overflow = _x < 0 || _y < 0;
+    if (_imageOverflow.value != overflow) {
+      _imageOverflow.value = overflow;
+    }
+    if (isMobile) {
+      isMobileCanvasChanged = true;
+    }
+    notifyListeners();
+  }
+
+  Future<void> setZoomPercent(int percent) async {
+    final clamped = clampCustomScalePercent(percent);
+    final targetScale = kIgnoreDpi
+        ? (clamped / 100.0) / (_devicePixelRatio > 0 ? _devicePixelRatio : 1.0)
+        : clamped / 100.0;
+    setZoomScale(targetScale);
+    await bind.sessionSetFlutterOption(
+      sessionId: sessionId,
+      k: kCustomScalePercentKey,
+      v: clamped.toString(),
+    );
+    await bind.sessionSetViewStyle(
+      sessionId: sessionId,
+      value: kRemoteViewStyleCustom,
+    );
+  }
+
+  Future<void> applyZoomPreset(String preset) async {
+    if (preset == kRemoteViewStyleAdaptive || preset == 'fit') {
+      await bind.sessionSetViewStyle(
+          sessionId: sessionId, value: kRemoteViewStyleAdaptive);
+      await updateViewStyle();
+    } else if (preset == kRemoteViewStyleOriginal || preset == '100') {
+      await bind.sessionSetViewStyle(
+          sessionId: sessionId, value: kRemoteViewStyleOriginal);
+      await updateViewStyle();
+    } else if (preset == 'reset') {
+      reset();
+    } else {
+      final p = int.tryParse(preset);
+      if (p != null) {
+        await setZoomPercent(p);
+      }
+    }
+  }
 
   void setLocked(bool value) {
     if (_locked == value) return;
@@ -3905,9 +4001,125 @@ class QualityMonitorModel with ChangeNotifier {
   QualityMonitorModel(this.parent);
   var _show = false;
   final _data = QualityMonitorData();
+  final RxBool hdrMode = false.obs;
+  final RxBool autoColorDowngrade = true.obs;
+  int _lowPerfStreak = 0;
 
   bool get show => _show;
   QualityMonitorData get data => _data;
+
+  Future<void> loadSessionColorOptions() async {
+    final ffi = parent.target;
+    if (ffi == null) return;
+    hdrMode.value = bind.sessionGetToggleOptionSync(
+        sessionId: ffi.sessionId, arg: kOptionHdrMode);
+    final autoOpt = await bind.sessionGetOption(
+        sessionId: ffi.sessionId, arg: kOptionAutoColorDowngrade);
+    autoColorDowngrade.value = autoOpt != 'N';
+  }
+
+  Future<void> setAutoColorDowngrade(bool enabled) async {
+    final ffi = parent.target;
+    if (ffi == null) return;
+    autoColorDowngrade.value = enabled;
+    await bind.sessionPeerOption(
+        sessionId: ffi.sessionId,
+        name: kOptionAutoColorDowngrade,
+        value: enabled ? 'Y' : 'N');
+  }
+
+  Future<void> setTrueColor(bool enabled) async {
+    final ffi = parent.target;
+    if (ffi == null) return;
+    final sessionId = ffi.sessionId;
+    final cur = bind.sessionGetToggleOptionSync(
+        sessionId: sessionId, arg: kOptionI444);
+    if (cur != enabled) {
+      await bind.sessionToggleOption(sessionId: sessionId, value: kOptionI444);
+    }
+    if (enabled) {
+      if (hdrMode.value) {
+        hdrMode.value = false;
+        await bind.sessionPeerOption(
+            sessionId: sessionId, name: kOptionHdrMode, value: '');
+      }
+      final codec = _data.codecFormat ?? '';
+      if (codec != 'VP9' && codec != 'AV1') {
+        await bind.sessionPeerOption(
+            sessionId: sessionId, name: kOptionCodecPreference, value: 'vp9');
+      }
+    }
+    bind.sessionChangePreferCodec(sessionId: sessionId);
+    notifyListeners();
+  }
+
+  Future<void> setHdrMode(bool enabled) async {
+    final ffi = parent.target;
+    if (ffi == null) return;
+    final sessionId = ffi.sessionId;
+    hdrMode.value = enabled;
+    await bind.sessionPeerOption(
+        sessionId: sessionId,
+        name: kOptionHdrMode,
+        value: enabled ? 'Y' : '');
+    if (enabled) {
+      final i444 = bind.sessionGetToggleOptionSync(
+          sessionId: sessionId, arg: kOptionI444);
+      if (i444) {
+        await bind.sessionToggleOption(
+            sessionId: sessionId, value: kOptionI444);
+        bind.sessionChangePreferCodec(sessionId: sessionId);
+      }
+    }
+    notifyListeners();
+  }
+
+  Future<void> setStandardColor() async {
+    await setHdrMode(false);
+    await setTrueColor(false);
+  }
+
+  void _checkAutoDowngrade() {
+    if (!autoColorDowngrade.value) {
+      _lowPerfStreak = 0;
+      return;
+    }
+    final ffi = parent.target;
+    if (ffi == null || ffi.closed) return;
+    final fpsVal = double.tryParse((_data.fps ?? '').split(' ').first);
+    final delayStr = (_data.delay ?? '').replaceAll(RegExp(r'[^0-9.]'), '');
+    final delayVal = double.tryParse(delayStr);
+    final congested =
+        (fpsVal != null && fpsVal > 0 && fpsVal < 15) ||
+        (delayVal != null && delayVal > 350);
+    if (!congested) {
+      _lowPerfStreak = 0;
+      return;
+    }
+    _lowPerfStreak += 1;
+    if (_lowPerfStreak < 4) return;
+    _lowPerfStreak = 0;
+
+    final sessionId = ffi.sessionId;
+    if (hdrMode.value) {
+      unawaited(setHdrMode(false));
+      showToast(translate('Performance constrained: downgraded HDR to standard color'));
+    } else if (bind.sessionGetToggleOptionSync(
+        sessionId: sessionId, arg: kOptionI444)) {
+      unawaited(setTrueColor(false));
+      showToast(translate('Performance constrained: downgraded True Color (4:4:4)'));
+    } else {
+      unawaited(() async {
+        final curQ =
+            await bind.sessionGetImageQuality(sessionId: sessionId) ?? '';
+        if (curQ != kRemoteImageQualityLow && curQ != kRemoteImageQualityBalanced) {
+          await bind.sessionSetImageQuality(
+              sessionId: sessionId, value: kRemoteImageQualityBalanced);
+          showToast(translate('Performance constrained: switched to balanced quality'));
+        }
+      }());
+    }
+  }
 
   // Only a WebRTC session on the web names its transport here: web has no
   // session tab to show it on (the desktop tab's tooltip already does), and
@@ -3971,6 +4183,7 @@ class QualityMonitorModel with ChangeNotifier {
       if (evt.containsKey('chroma') && (evt['chroma'] as String).isNotEmpty) {
         _data.chroma = evt['chroma'];
       }
+      _checkAutoDowngrade();
       notifyListeners();
     } catch (e) {
       //

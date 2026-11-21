@@ -2209,6 +2209,9 @@ fn prepare_decoded_audio(
     Ok(output)
 }
 
+static AUDIO_PLAYBACK_VOLUME: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(100);
+
 #[cfg(not(target_os = "linux"))]
 struct AudioBuffer(
     pub Arc<std::sync::Mutex<ringbuf::HeapRb<f32>>>,
@@ -2528,6 +2531,13 @@ impl AudioHandler {
             };
             let channels = self.channels;
             let n = decoded_frames * channels as usize;
+            let volume = AUDIO_PLAYBACK_VOLUME.load(std::sync::atomic::Ordering::Relaxed);
+            if volume < 100 {
+                let gain = (volume as f32) / 100.0;
+                for sample in &mut buffer[0..n] {
+                    *sample *= gain;
+                }
+            }
             #[cfg(not(target_os = "linux"))]
             {
                 let config = DecodedAudioConfig {
@@ -2963,6 +2973,12 @@ impl LoginConfigHandler {
         let config = self.load_config();
         self.remember = !config.password.is_empty();
         self.config = config;
+        let saved_volume = self
+            .get_option(keys::OPTION_AUDIO_VOLUME)
+            .parse::<u32>()
+            .unwrap_or(100)
+            .min(100);
+        AUDIO_PLAYBACK_VOLUME.store(saved_volume, std::sync::atomic::Ordering::Relaxed);
 
         let conn_token = conn_token
             .map(|x| serde_json::from_str::<ConnToken>(&x).ok())
@@ -3071,6 +3087,11 @@ impl LoginConfigHandler {
     /// * `k` - key of option
     /// * `v` - value of option
     pub fn set_option(&mut self, k: String, v: String) {
+        if k == keys::OPTION_AUDIO_VOLUME {
+            if let Ok(vol) = v.parse::<u32>() {
+                AUDIO_PLAYBACK_VOLUME.store(vol.min(100), std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         let mut config = self.load_config();
         if v == self.get_option(&k) {
             return;
@@ -3380,11 +3401,11 @@ impl LoginConfigHandler {
             }
         }
         let q = self.image_quality.clone();
+        let allow_more = !crate::using_public_server() || self.direct == Some(true);
         if let Some(q) = self.get_image_quality_enum(&q, ignore_default) {
             msg.image_quality = q.into();
         } else if q == "custom" {
             let config = self.load_config();
-            let allow_more = !crate::using_public_server() || self.direct == Some(true);
             let quality = if config.custom_image_quality.is_empty() {
                 50
             } else {
@@ -3395,15 +3416,18 @@ impl LoginConfigHandler {
                 quality
             };
             msg.custom_image_quality = quality << 8;
-            #[cfg(feature = "flutter")]
-            if let Some(custom_fps) = self.options.get("custom-fps") {
-                let mut custom_fps = custom_fps.parse().unwrap_or(30);
-                if !allow_more && custom_fps > 30 {
-                    custom_fps = 30;
-                }
-                msg.custom_fps = custom_fps;
-                *self.custom_fps.lock().unwrap() = Some(custom_fps as _);
+        }
+        #[cfg(feature = "flutter")]
+        if let Some(custom_fps) = self.options.get("custom-fps") {
+            let mut custom_fps = custom_fps.parse().unwrap_or(30);
+            if !allow_more && custom_fps > 30 {
+                custom_fps = 30;
             }
+            msg.custom_fps = custom_fps;
+            *self.custom_fps.lock().unwrap() = Some(custom_fps as _);
+        }
+        if self.get_toggle_option(keys::OPTION_HDR_MODE) {
+            msg.hdr_mode = BoolOption::Yes.into();
         }
         let view_only = self.get_toggle_option("view-only");
         if view_only {

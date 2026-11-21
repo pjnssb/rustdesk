@@ -178,12 +178,34 @@ message TouchPanEnd {
   int32 y = 2;
 }
 
+enum TouchPhase {
+  TouchDown = 0;
+  TouchMove = 1;
+  TouchUp = 2;
+  TouchCancel = 3;
+}
+
+message TouchContact {
+  uint32 id = 1;
+  TouchPhase phase = 2;
+  sint32 x = 3;
+  sint32 y = 4;
+  uint32 width = 5;
+  uint32 height = 6;
+  uint32 pressure = 7;
+}
+
+message TouchContacts {
+  repeated TouchContact contacts = 1;
+}
+
 message TouchEvent {
   oneof union {
     TouchScaleUpdate scale_update = 1;
     TouchPanStart pan_start = 2;
     TouchPanUpdate pan_update = 3;
     TouchPanEnd pan_end = 4;
+    TouchContacts contacts = 5;
   }
 }
 
@@ -700,6 +722,7 @@ message OptionMessage {
   BoolOption disable_camera = 17;
   BoolOption terminal_persistent = 18;
   BoolOption show_my_cursor = 19;
+  BoolOption hdr_mode = 20;
 }
 
 message TestDelay {
@@ -829,6 +852,34 @@ message MessageQuery {
   int32 switch_display = 1;
 }
 
+message DrawStrokePoint {
+  float x = 1;
+  float y = 2;
+  float pressure = 3;
+}
+
+message DrawStroke {
+  uint32 stroke_id = 1;
+  uint32 color = 2;
+  float width = 3;
+  repeated DrawStrokePoint points = 4;
+  bool finished = 5;
+}
+
+message ScreenDrawAction {
+  oneof union {
+    bool toggle = 1;
+    DrawStroke stroke = 2;
+    bool clear = 3;
+  }
+}
+
+message SystemMetrics {
+  uint32 lock_states = 1;
+  uint32 cpu_usage = 2;
+  uint32 mem_usage = 3;
+}
+
 message Misc {
   oneof union {
     ChatMessage chat_message = 4;
@@ -872,6 +923,8 @@ message Misc {
     // is rebuilt, and held again, the next time it is shown, before any connection names it
     // by id again, so the shape just selected is always there to give.
     uint64 request_cursor_data = 39;
+    ScreenDrawAction screen_draw = 40;
+    SystemMetrics system_metrics = 41;
   }
 }
 

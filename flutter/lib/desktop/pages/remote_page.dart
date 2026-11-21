@@ -13,7 +13,9 @@ import '../../common/widgets/overlay.dart';
 import '../../common/widgets/remote_input.dart';
 import '../../common.dart';
 import '../../common/widgets/dialog.dart';
+import '../../common/widgets/screen_draw_overlay.dart';
 import '../../common/widgets/toolbar.dart';
+import '../../common/widgets/uu_session_panel.dart';
 import '../../models/model.dart';
 import '../../models/input_model.dart';
 import '../../models/platform_model.dart';
@@ -133,6 +135,8 @@ class _RemotePageState extends State<RemotePage>
   Worker? _waylandKeyboardModeWorker;
   bool _waylandKeyboardModeNormalized = false;
   bool _waylandKeyboardModeNormalizing = false;
+  bool _showSettingsDrawer = false;
+  bool _showScreenDraw = false;
 
   SessionID get sessionId => _ffi.sessionId;
 
@@ -711,25 +715,161 @@ class _RemotePageState extends State<RemotePage>
         ),
       );
 
+  Future<void> _showShortcutsPopupMenu(BuildContext context) async {
+    final size = MediaQuery.of(context).size;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(size.width - 280, 44, 160, 0),
+      items: [
+        if (_ffi.ffiModel.pi.platform == kPeerPlatformLinux ||
+            _ffi.ffiModel.pi.sasEnabled)
+          PopupMenuItem(
+            value: 'cad',
+            child: Text(translate('Insert Ctrl + Alt + Del')),
+          ),
+        PopupMenuItem(
+          value: 'desktop',
+          child: Text('${translate('Show desktop')} (Win+D)'),
+        ),
+        PopupMenuItem(
+          value: 'taskmgr',
+          child: Text('${translate('Task manager')} (Ctrl+Shift+Esc)'),
+        ),
+        PopupMenuItem(
+          value: 'lock',
+          child: Text(translate('Insert Lock')),
+        ),
+        PopupMenuItem(
+          value: 'paste_keys',
+          child: Text(translate('Send clipboard keystrokes')),
+        ),
+        PopupMenuItem(
+          value: 'refresh',
+          child: Text(translate('Refresh')),
+        ),
+      ],
+    );
+    switch (selected) {
+      case 'cad':
+        bind.sessionCtrlAltDel(sessionId: sessionId);
+        break;
+      case 'desktop':
+        _ffi.inputModel.command = true;
+        _ffi.inputModel.inputKey('VK_D');
+        _ffi.inputModel.command = false;
+        break;
+      case 'taskmgr':
+        _ffi.inputModel.ctrl = true;
+        _ffi.inputModel.shift = true;
+        _ffi.inputModel.inputKey('VK_ESCAPE');
+        _ffi.inputModel.ctrl = false;
+        _ffi.inputModel.shift = false;
+        break;
+      case 'lock':
+        bind.sessionLockScreen(sessionId: sessionId);
+        break;
+      case 'paste_keys':
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        if (data?.text != null && data!.text!.isNotEmpty) {
+          bind.sessionInputString(sessionId: sessionId, value: data.text!);
+        }
+        break;
+      case 'refresh':
+        sessionRefreshVideo(sessionId, _ffi.ffiModel.pi);
+        break;
+    }
+  }
+
   Widget buildBody(BuildContext context) {
-    remoteToolbar(BuildContext context) => RemoteToolbar(
-          id: widget.id,
-          ffi: _ffi,
-          state: widget.toolbarState,
-          onEnterOrLeaveImageSetter: (id, func) {
-            _instanceIdOnEnterOrLeaveImage4Toolbar = id;
-            _onEnterOrLeaveImage4Toolbar = func;
-          },
-          onEnterOrLeaveImageCleaner: (id) {
-            // If _instanceIdOnEnterOrLeaveImage4Toolbar != id
-            // it means `_onEnterOrLeaveImage4Toolbar` is not set or it has been changed to another toolbar.
-            if (_instanceIdOnEnterOrLeaveImage4Toolbar == id) {
-              _instanceIdOnEnterOrLeaveImage4Toolbar = null;
-              _onEnterOrLeaveImage4Toolbar = null;
-            }
-          },
-          setRemoteState: setState,
+    Widget buildUUChrome(BuildContext context) {
+      widget.toolbarState.init(sessionId);
+      return Obx(() {
+        if (_ffi.inputModel.relativeMouseMode.value) {
+          return const Offstage();
+        }
+        final isCollapsed = widget.toolbarState.collapse.value;
+        final isHidden = widget.toolbarState.hide.value;
+        if (isHidden) {
+          return const Offstage();
+        }
+        return Stack(
+          children: [
+            if (_showScreenDraw)
+              ScreenDrawOverlay(
+                onClose: () => setState(() => _showScreenDraw = false),
+              ),
+            if (!isCollapsed)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: UUDesktopTopBar(
+                  id: widget.id,
+                  ffi: _ffi,
+                  drawerOpen: _showSettingsDrawer,
+                  pinned: widget.toolbarState.pin,
+                  onToggleDrawer: () =>
+                      setState(() => _showSettingsDrawer = !_showSettingsDrawer),
+                  onTogglePin: () => widget.toolbarState.switchPin(),
+                  onCollapse: () =>
+                      widget.toolbarState.switchCollapse(sessionId),
+                  onDisconnect: () => clientClose(sessionId, _ffi),
+                  onShowShortcuts: () => _showShortcutsPopupMenu(context),
+                ),
+              )
+            else
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: InkWell(
+                    onTap: () => widget.toolbarState.switchCollapse(sessionId),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 2),
+                      decoration: const BoxDecoration(
+                        color: Color(0xDD171A21),
+                        borderRadius: BorderRadius.vertical(
+                            bottom: Radius.circular(8)),
+                      ),
+                      child: const Icon(Icons.keyboard_arrow_down,
+                          size: 16, color: Colors.white70),
+                    ),
+                  ),
+                ),
+              ),
+            if (_ffi.ffiModel.pi.isSet.isTrue &&
+                _ffi.ffiModel.waitForFirstImage.isFalse)
+              Positioned(
+                bottom: 12,
+                left: 14,
+                child: UUDesktopBottomTelemetry(ffi: _ffi),
+              ),
+            if (_showSettingsDrawer)
+              Positioned(
+                top: isCollapsed ? 0 : 40,
+                bottom: 0,
+                right: 0,
+                child: UUSessionSettingsPanel(
+                  id: widget.id,
+                  ffi: _ffi,
+                  isMobileStyle: false,
+                  screenDrawActive: _showScreenDraw,
+                  onToggleScreenDraw: () =>
+                      setState(() => _showScreenDraw = !_showScreenDraw),
+                  onAdjustWindow: () => ScreenAdjustor(
+                    id: widget.id,
+                    ffi: _ffi,
+                    cbExitFullscreen: () {},
+                  ).doAdjustWindow(context),
+                  onClose: () => setState(() => _showSettingsDrawer = false),
+                ),
+              ),
+          ],
         );
+      });
+    }
 
     bodyWidget() {
       return Stack(
@@ -782,16 +922,7 @@ class _RemotePageState extends State<RemotePage>
                             ));
                       }
                     }(),
-              // Use Overlay to enable rebuild every time on menu button click.
-              // Hide toolbar when relative mouse mode is active to prevent
-              // cursor from escaping to toolbar area.
-              Obx(() => _ffi.inputModel.relativeMouseMode.value
-                  ? const Offstage()
-                  : _ffi.ffiModel.pi.isSet.isTrue
-                      ? Overlay(initialEntries: [
-                          OverlayEntry(builder: remoteToolbar)
-                        ])
-                      : remoteToolbar(context)),
+              buildUUChrome(context),
               _ffi.ffiModel.pi.isSet.isFalse ? emptyOverlay() : Offstage(),
             ],
           ),
@@ -1004,16 +1135,30 @@ class _RemotePageState extends State<RemotePage>
                   zoomCursor: _zoomCursor,
                 )));
     }
-    paints.add(
-      Positioned(
-        top: 10,
-        right: 10,
-        child: _buildRawTouchAndPointerRegion(
-            QualityMonitor(_ffi.qualityMonitorModel), null, null),
-      ),
-    );
     return Stack(
-      children: paints,
+      children: [
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: _ffi.canvasModel,
+            builder: (context, child) {
+              final turns = _ffi.canvasModel.rotationTurns;
+              return turns == 0
+                  ? child!
+                  : RotatedBox(
+                      quarterTurns: turns,
+                      child: SizedBox.expand(child: child),
+                    );
+            },
+            child: Stack(children: paints),
+          ),
+        ),
+        Positioned(
+          top: 52,
+          right: 14,
+          child: _buildRawTouchAndPointerRegion(
+              QualityMonitor(_ffi.qualityMonitorModel), null, null),
+        ),
+      ],
     );
   }
 

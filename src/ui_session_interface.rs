@@ -498,11 +498,14 @@ impl<T: InvokeUiSession> Session<T> {
             self.send(Data::Message(msg));
         }
         if value != "custom" {
-            let custom_fps = *self.lc.read().unwrap().custom_fps.lock().unwrap();
-            if custom_fps.unwrap_or(30) != 30 {
-                // non custom quality use 30 fps
-                let msg = self.lc.write().unwrap().set_custom_fps(30, false);
-                self.send(Data::Message(msg));
+            let saved_fps = self.lc.read().unwrap().get_option("custom-fps");
+            if saved_fps.is_empty() {
+                let custom_fps = *self.lc.read().unwrap().custom_fps.lock().unwrap();
+                if custom_fps.unwrap_or(30) != 30 {
+                    // non custom quality use 30 fps
+                    let msg = self.lc.write().unwrap().set_custom_fps(30, false);
+                    self.send(Data::Message(msg));
+                }
             }
         }
     }
@@ -1216,6 +1219,27 @@ impl<T: InvokeUiSession> Session<T> {
                 return;
             }
         };
+        let mut evt = PointerDeviceEvent::new();
+        evt.set_touch_event(touch_evt);
+        send_pointer_device_event(evt, alt, ctrl, shift, command, self);
+    }
+
+    pub fn send_touch_contacts(
+        &self,
+        contacts: Vec<TouchContact>,
+        alt: bool,
+        ctrl: bool,
+        shift: bool,
+        command: bool,
+    ) {
+        if contacts.is_empty() {
+            return;
+        }
+        let mut touch_evt = TouchEvent::new();
+        touch_evt.set_contacts(TouchContacts {
+            contacts,
+            ..Default::default()
+        });
         let mut evt = PointerDeviceEvent::new();
         evt.set_touch_event(touch_evt);
         send_pointer_device_event(evt, alt, ctrl, shift, command, self);

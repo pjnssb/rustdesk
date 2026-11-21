@@ -1932,6 +1932,57 @@ fn session_send_touch_pan(
     }
 }
 
+fn session_send_touch_contacts(
+    session_id: SessionID,
+    v: &serde_json::Value,
+    alt: bool,
+    ctrl: bool,
+    shift: bool,
+    command: bool,
+) {
+    use base::message_proto::{TouchContact, TouchPhase};
+    let Some(items) = v.get("v").and_then(|c| c.as_array()) else {
+        return;
+    };
+    let mut contacts = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(id) = item.get("id").and_then(|x| x.as_u64()) else {
+            continue;
+        };
+        let Some(x) = item.get("x").and_then(|x| x.as_i64()) else {
+            continue;
+        };
+        let Some(y) = item.get("y").and_then(|y| y.as_i64()) else {
+            continue;
+        };
+        let phase = match item.get("phase").and_then(|p| p.as_str()) {
+            Some("down") => TouchPhase::TouchDown,
+            Some("move") => TouchPhase::TouchMove,
+            Some("up") => TouchPhase::TouchUp,
+            Some("cancel") => TouchPhase::TouchCancel,
+            _ => continue,
+        };
+        let width = item.get("w").and_then(|w| w.as_u64()).unwrap_or(16) as u32;
+        let height = item.get("h").and_then(|h| h.as_u64()).unwrap_or(16) as u32;
+        let pressure = item.get("p").and_then(|p| p.as_u64()).unwrap_or(512) as u32;
+        contacts.push(TouchContact {
+            id: id as u32,
+            phase: phase.into(),
+            x: x as i32,
+            y: y as i32,
+            width,
+            height,
+            pressure,
+            ..Default::default()
+        });
+    }
+    if !contacts.is_empty() {
+        if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+            session.send_touch_contacts(contacts, alt, ctrl, shift, command);
+        }
+    }
+}
+
 fn session_send_touch_event(
     session_id: SessionID,
     v: &serde_json::Value,
@@ -1942,6 +1993,7 @@ fn session_send_touch_event(
 ) {
     match v.get("t").and_then(|t| t.as_str()) {
         Some("scale") => session_send_touch_scale(session_id, v, alt, ctrl, shift, command),
+        Some("contacts") => session_send_touch_contacts(session_id, v, alt, ctrl, shift, command),
         Some(pan_event) => {
             session_send_touch_pan(session_id, v, pan_event, alt, ctrl, shift, command)
         }

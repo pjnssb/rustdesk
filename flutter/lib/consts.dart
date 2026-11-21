@@ -193,6 +193,16 @@ const String kOptionAllowMonitorSwitchMainToolbar = "allow-monitor-switch-main-t
 const String kOptionAllowMonitorSwitchMinToolbar = "allow-monitor-switch-min-toolbar";
 const String kOptionEnableShowTerminalExtraKeys = "enable-show-terminal-extra-keys";
 const String kOptionShowTerminalCtrlKeys = "show-terminal-extra-ctrl-keys";
+const String kOptionMobileInputMode = "mobile-input-mode";
+const String kMobileInputNativeTouch = "native_touch";
+const String kMobileInputTouchMouse = "touch_mouse";
+const String kMobileInputMouse = "mouse";
+const String kOptionHdrMode = "hdr-mode";
+const String kOptionAutoColorDowngrade = "auto-color-downgrade";
+const String kOptionAudioVolume = "audio-volume";
+const String kOptionSmartMouse = "smart-mouse";
+const String kOptionMouseSensitivity = "mouse-sensitivity";
+const String kOptionScreenRotation = "screen-rotation";
 
 // network options
 const String kOptionAllowWebSocket = "allow-websocket";
@@ -284,7 +294,7 @@ const double kDesktopFileTransferHeaderHeight = 25.0;
 
 const double kMinFps = 5;
 const double kDefaultFps = 30;
-const double kMaxFps = 120;
+const double kMaxFps = 144;
 
 const double kMinQuality = 10;
 const double kDefaultQuality = 50;
